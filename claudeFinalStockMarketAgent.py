@@ -14,8 +14,8 @@ import pytz
 # ==========================================
 # 🔴 CONFIGURATION
 # ==========================================
-API_TOKEN = "8503525528:AAFbLZ7sOF6YhfpEnQctuJJii6_PxlBVvlw"
-YOUR_CHAT_ID = "7960622303"
+API_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
+YOUR_CHAT_ID = "YOUR_CHAT_ID"
 # ==========================================
 
 bot = telebot.TeleBot(API_TOKEN)
@@ -568,29 +568,72 @@ def show_stats(message):
 # ==========================================
 def scanner_loop():
     print("="*70)
-    print("🚀 ULTIMATE TRADING BOT v1.0")
+    print("🚀 ULTIMATE TRADING BOT v2.0 (Smart Alerts + Daily Reset)")
     print("="*70)
     print("📊 Execution: SHARES (proven 89% return)")
     print("⚡ Insights: OPTIONS (manual consideration)")
     print("🎯 Thresholds: Bull ≥65, Bear ≤40, ADX >20")
     print("⏰ Active: 6:00 AM - 5:00 PM EST")
     print("📈 Scanning: S&P 300 + Yahoo Top 30")
+    print("🔔 Smart Alerts: Only on direction changes or significant score moves")
+    print("⏱️  Timing: 6-9 AM (60min) | 9 AM-4 PM (30min) | 4-5 PM (45min)")
+    print("🌅 Daily Reset: Memory clears at midnight EST (fresh start)")
     print("="*70 + "\n")
     
     analysis_cache = {}
     cache_expiry = 900
     
+    # Track last alerts to prevent duplicates
+    last_alerts = {}  # {ticker: {'direction': 'BULL', 'score': 78, 'time': timestamp}}
+    
+    # Track current day for midnight reset
+    tz = pytz.timezone('US/Eastern')
+    current_day = datetime.now(tz).date()
+    
+    print(f"📅 Trading day: {current_day.strftime('%Y-%m-%d')}")
+    print(f"🔄 Alert memory initialized\n")
+    
     while True:
         try:
             tz = pytz.timezone('US/Eastern')
             now = datetime.now(tz)
+            today = now.date()
+            
+            # ==========================================
+            # MIDNIGHT RESET - Fresh start each day
+            # ==========================================
+            if today != current_day:
+                print("\n" + "="*70)
+                print(f"🌅 NEW TRADING DAY: {today.strftime('%Y-%m-%d')}")
+                print("="*70)
+                print(f"🔄 Resetting alert memory (yesterday: {len(last_alerts)} stocks tracked)")
+                print(f"📊 Fresh analysis starts now")
+                print("="*70 + "\n")
+                
+                last_alerts = {}  # Clear all previous day's alerts
+                current_day = today  # Update day tracker
+            
+            # Determine scan interval based on time of day (PRO INVESTOR TIMING)
+            if 6 <= now.hour < 9:
+                scan_interval = 3600  # 60 minutes (pre-market, low volume)
+                interval_name = "60 min"
+            elif 9 <= now.hour < 16:
+                scan_interval = 1800  # 30 minutes (market hours, high volume)
+                interval_name = "30 min"
+            elif 16 <= now.hour < 17:
+                scan_interval = 2700  # 45 minutes (after-hours, medium volume)
+                interval_name = "45 min"
+            else:
+                scan_interval = None  # Off hours
             
             # 6 AM - 5 PM EST
             if 6 <= now.hour < 17 and now.weekday() < 5:
                 tickers = get_scan_tickers()
-                print(f"🔍 Scan at {now.strftime('%H:%M')} EST | {len(tickers)} tickers\n")
+                print(f"🔍 Scan at {now.strftime('%H:%M')} EST | {len(tickers)} tickers | Next: {interval_name}")
+                print(f"📊 Tracking {len(last_alerts)} stocks for duplicates\n")
                 
                 alerts_sent = 0
+                duplicates_skipped = 0
                 errors = 0
                 
                 for idx, ticker in enumerate(tickers, 1):
@@ -611,30 +654,74 @@ def scanner_loop():
                             analysis_cache[cache_key] = (time.time(), data)
                         
                         if data:
-                            try:
-                                bot.send_message(YOUR_CHAT_ID, generate_alert_message(data), parse_mode="Markdown")
-                                
-                                log_entry = {
-                                    "Time": now.strftime("%Y-%m-%d %H:%M"),
-                                    "Ticker": ticker,
-                                    "Direction": data['direction'],
-                                    "Price": data['price'],
-                                    "Score": data['score'],
-                                    "Reasons": "; ".join(data['reasons'][:3])
-                                }
-                                log_trade_to_csv(log_entry)
-                                
-                                alerts_sent += 1
-                                print(f"  [{idx}/{len(tickers)}] ✅ {ticker} {data['direction']} (Score: {data['score']})")
-                                time.sleep(2)
+                            # ============================================
+                            # SMART DUPLICATE ALERT PREVENTION
+                            # ============================================
+                            should_alert = False
+                            alert_reason = ""
                             
-                            except Exception as e:
-                                print(f"  [{idx}/{len(tickers)}] ❌ Telegram error: {e}")
-                                errors += 1
+                            if ticker not in last_alerts:
+                                # First time - always alert
+                                should_alert = True
+                                alert_reason = "NEW"
+                            else:
+                                last = last_alerts[ticker]
+                                
+                                # RULE 1: Direction changed (CRITICAL!)
+                                if last['direction'] != data['direction']:
+                                    should_alert = True
+                                    alert_reason = f"🔄 {last['direction']}→{data['direction']}"
+                                
+                                # RULE 2: Score moved significantly (±10 points)
+                                elif abs(last['score'] - data['score']) >= 10:
+                                    should_alert = True
+                                    alert_reason = f"📊 Score {last['score']}→{data['score']}"
+                                
+                                # RULE 3: Alert is stale (>4 hours - market may have shifted)
+                                elif time.time() - last['time'] > 14400:
+                                    should_alert = True
+                                    alert_reason = "⏰ Stale (>4hrs)"
+                                
+                                else:
+                                    # Same direction, similar score, recent - SKIP
+                                    should_alert = False
+                                    duplicates_skipped += 1
+                            
+                            if should_alert:
+                                try:
+                                    # Send alert
+                                    bot.send_message(YOUR_CHAT_ID, generate_alert_message(data), parse_mode="Markdown")
+                                    
+                                    # Update tracker
+                                    last_alerts[ticker] = {
+                                        'direction': data['direction'],
+                                        'score': data['score'],
+                                        'time': time.time()
+                                    }
+                                    
+                                    # Log
+                                    log_entry = {
+                                        "Time": now.strftime("%Y-%m-%d %H:%M"),
+                                        "Ticker": ticker,
+                                        "Direction": data['direction'],
+                                        "Price": data['price'],
+                                        "Score": data['score'],
+                                        "Reasons": "; ".join(data['reasons'][:3]),
+                                        "Alert_Reason": alert_reason
+                                    }
+                                    log_trade_to_csv(log_entry)
+                                    
+                                    alerts_sent += 1
+                                    print(f"  [{idx}/{len(tickers)}] ✅ {ticker} {data['direction']} ({data['score']}) - {alert_reason}")
+                                    time.sleep(2)
+                                
+                                except Exception as e:
+                                    print(f"  [{idx}/{len(tickers)}] ❌ Telegram error: {e}")
+                                    errors += 1
                         
                         if idx % 50 == 0:
                             print(f"\n  📊 Progress: {idx}/{len(tickers)} ({idx/len(tickers)*100:.1f}%)")
-                            print(f"  ✅ Alerts: {alerts_sent} | ❌ Errors: {errors}\n")
+                            print(f"  ✅ Sent: {alerts_sent} | ⏭️  Skipped: {duplicates_skipped} | ❌ Errors: {errors}\n")
                     
                     except Exception as e:
                         errors += 1
@@ -643,14 +730,19 @@ def scanner_loop():
                             time.sleep(60)
                         continue
                 
-                # Clean cache
+                # Clean old cache entries (technical analysis cache)
                 current_time = time.time()
                 analysis_cache = {k: v for k, v in analysis_cache.items() 
                                 if current_time - v[0] < cache_expiry}
                 
-                print(f"\n💤 Scan done: {alerts_sent} alerts, {errors} errors")
-                print(f"   Sleeping 15 minutes...\n")
-                time.sleep(900)
+                # No need to clean last_alerts - midnight reset handles it
+                
+                print(f"\n💤 Scan complete at {now.strftime('%H:%M')}")
+                print(f"   ✅ New alerts sent: {alerts_sent}")
+                print(f"   ⏭️  Duplicates skipped: {duplicates_skipped}")
+                print(f"   ❌ Errors: {errors}")
+                print(f"   ⏱️  Next scan in {interval_name}\n")
+                time.sleep(scan_interval)
             
             else:
                 next_scan = "6:00 AM" if now.hour < 6 else "tomorrow 6:00 AM"
