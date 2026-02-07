@@ -11,20 +11,30 @@ from flask import Flask
 from datetime import datetime
 import pytz
 
+# NEW: Position tracking imports
+from position_tracker import PositionTracker
+from config import get_telegram_token, get_telegram_chat_id
+
 # ==========================================
-# 🔴 CONFIGURATION
+# 🔐 SECURE CONFIGURATION (from environment variables)
 # ==========================================
-API_TOKEN = "8503525528:AAFbLZ7sOF6YhfpEnQctuJJii6_PxlBVvlw"
-YOUR_CHAT_ID = "7960622303"
+print("\n🔐 Loading credentials securely...")
+API_TOKEN = get_telegram_token()
+YOUR_CHAT_ID = get_telegram_chat_id()
+print("✅ All credentials loaded from environment\n")
 # ==========================================
 
 bot = telebot.TeleBot(API_TOKEN)
 app = Flask(__name__)
 
+# NEW: Initialize position tracker
+position_tracker = PositionTracker()
+
 # ==========================================
-# ULTIMATE HYBRID: SHARES EXECUTION + OPTIONS INSIGHTS
+# ULTIMATE HYBRID: SHARES EXECUTION + OPTIONS INSIGHTS + POSITION TRACKING
 # Trades shares (proven 89% return)
 # Shows options for manual consideration
+# Tracks all positions with stop/target alerts
 # ==========================================
 
 def log_trade_to_csv(trade_data):
@@ -227,11 +237,7 @@ def calculate_scores(row):
 # OPTIONS INSIGHTS (NOT FOR EXECUTION, JUST INFO)
 # ==========================================
 def get_option_insights(ticker, direction, atr, current_price):
-    """
-    Get options details for user information
-    Shows what OPTIONS PLAY would look like
-    User decides if they want to trade it manually
-    """
+    """Get options details for user information"""
     try:
         stock = yf.Ticker(ticker)
         exps = stock.options
@@ -242,7 +248,6 @@ def get_option_insights(ticker, direction, atr, current_price):
         target_dte = 45
         best_expiry = None
         
-        # Find 30-60 DTE expiry
         valid = {}
         for e in exps:
             try:
@@ -260,29 +265,24 @@ def get_option_insights(ticker, direction, atr, current_price):
         expiry_date = datetime.strptime(best_expiry, "%Y-%m-%d")
         dte = (expiry_date - today).days
         
-        # Target strike (ATM + expected move)
         move = atr * 1.5
         target_strike = current_price + move if direction == "CALL" else current_price - move
         
-        # Get chain
         opt = stock.option_chain(best_expiry)
         chain = opt.calls if direction == "CALL" else opt.puts
         
-        # Filter liquid options
         chain = chain[(chain['openInterest'] > 50) | (chain['volume'] > 10)]
         
         if chain.empty:
             return None
         
-        # Find best strike
         chain['diff'] = abs(chain['strike'] - target_strike)
         best = chain.sort_values('diff').iloc[0]
         
-        # Check spread
         spread = best['ask'] - best['bid']
         spread_pct = (spread / best['lastPrice'] * 100) if best['lastPrice'] > 0 else 999
         
-        if spread_pct > 25:  # Too wide
+        if spread_pct > 25:
             return None
         
         return {
@@ -296,8 +296,8 @@ def get_option_insights(ticker, direction, atr, current_price):
             "volume": int(best['volume']),
             "oi": int(best['openInterest']),
             "spread_pct": spread_pct,
-            "contracts_1k": int(1000 / (best['lastPrice'] * 100)),  # How many with $1k
-            "contracts_2.5k": int(2500 / (best['lastPrice'] * 100))  # How many with $2.5k
+            "contracts_1k": int(1000 / (best['lastPrice'] * 100)),
+            "contracts_2.5k": int(2500 / (best['lastPrice'] * 100))
         }
     
     except Exception as e:
@@ -307,11 +307,7 @@ def get_option_insights(ticker, direction, atr, current_price):
 # MAIN ANALYSIS
 # ==========================================
 def analyze_stock(ticker, strict=True):
-    """
-    Analyze stock and return:
-    1. Shares trade recommendation (BUY/SELL)
-    2. Options insights (for manual consideration)
-    """
+    """Analyze stock and return signal data"""
     try:
         stock = yf.Ticker(ticker)
         df = stock.history(period="2y")
@@ -322,11 +318,9 @@ def analyze_stock(ticker, strict=True):
         df = calculate_indicators(df)
         latest = df.iloc[-1]
         
-        # Check for NaN
         if pd.isna(latest['RSI']) or pd.isna(latest['ADX']) or pd.isna(latest['ATR']):
             return None
         
-        # Calculate scores
         bull, bear, confirms, bull_reasons, bear_reasons = calculate_scores(latest)
         
         direction = None
@@ -334,7 +328,6 @@ def analyze_stock(ticker, strict=True):
         shares_stop = 0
         shares_target = 0
         
-        # PROVEN THRESHOLDS
         if bull >= 65 and latest['ADX'] > 20:
             direction = "BULL"
             reasons = bull_reasons
@@ -359,8 +352,7 @@ def analyze_stock(ticker, strict=True):
             }
         
         if direction:
-            # Shares trade details
-            position_size_10pct = 2500  # Assuming $25k account, 10% = $2,500
+            position_size_10pct = 2500
             shares = int(position_size_10pct / latest['Close'])
             
             shares_trade = {
@@ -374,7 +366,6 @@ def analyze_stock(ticker, strict=True):
                 "reward_pct": abs((shares_target - latest['Close']) / latest['Close'] * 100)
             }
             
-            # Options insights
             opt_type = "CALL" if direction == "BULL" else "PUT"
             options_insight = get_option_insights(ticker, opt_type, latest['ATR'], latest['Close'])
             
@@ -400,15 +391,10 @@ def analyze_stock(ticker, strict=True):
 # MESSAGE FORMATTER
 # ==========================================
 def generate_alert_message(data):
-    """
-    Beautiful formatted alert with:
-    1. SHARES trade (recommended)
-    2. OPTIONS insights (alternative)
-    """
+    """Beautiful formatted alert"""
     if data['direction'] == "NEUTRAL":
         return f"⚖️ **{data['ticker']} NEUTRAL**\nScore: {data['score']}\n{data['reasons'][0]}"
     
-    # Signal strength
     if data['score'] >= 80:
         strength = "🔥 VERY STRONG"
         stars = "⭐⭐⭐⭐⭐"
@@ -425,12 +411,10 @@ def generate_alert_message(data):
     icon = "🚀" if data['direction'] == "BULL" else "🐻"
     color = "🟢" if data['direction'] == "BULL" else "🔴"
     
-    # Reasons (top 4)
     reasons = "\n".join([f"• {r}" for r in data['reasons'][:4]])
     
     st = data['shares_trade']
     
-    # Shares section
     shares_section = (
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"📈 **SHARES TRADE** (Recommended):\n"
@@ -438,13 +422,12 @@ def generate_alert_message(data):
         f"  💰 Capital: ${st['capital']:,.0f} (10% position)\n"
         f"  🛑 Stop: ${st['stop']:.2f} (-{st['risk_pct']:.1f}%)\n"
         f"  🎯 Target: ${st['target']:.2f} (+{st['reward_pct']:.1f}%)\n"
-        f"  📊 Risk/Reward: 1:{st['reward_pct']/st['risk_pct']:.1f}"
+        f"  📊 Risk/Reward: 1:{st['reward_pct']/st['risk_pct']:.1f}\n"
+        f"\n🤖 Position tracked! Exit alerts enabled."
     )
     
-    # Options section
     opt = data['options_insight']
     if opt:
-        # Time factor warning
         if opt['dte'] > 50:
             dte_warning = "⚠️ Long DTE (slower theta)"
         elif opt['dte'] < 35:
@@ -452,7 +435,6 @@ def generate_alert_message(data):
         else:
             dte_warning = f"✅ Optimal {opt['dte']} days"
         
-        # Liquidity check
         if opt['volume'] > 500 and opt['oi'] > 1000:
             liq_status = "✅ High Liquidity"
         elif opt['volume'] > 100 and opt['oi'] > 500:
@@ -468,7 +450,7 @@ def generate_alert_message(data):
             f"  📊 Vol: {opt['volume']:,} | OI: {opt['oi']:,}\n"
             f"  📈 Spread: {opt['spread_pct']:.1f}% {liq_status}\n"
             f"  🕐 {dte_warning}\n"
-            f"  💵 Suggested: {opt['contracts_1k']}-{opt['contracts_2.5k']} contracts (${opt['contracts_1k']*opt['last_price']*100:.0f}-${opt['contracts_2.5k']*opt['last_price']*100:.0f})\n"
+            f"  💵 Suggested: {opt['contracts_1k']}-{opt['contracts_2.5k']} contracts\n"
             f"\n"
             f"  🎯 Exit: 50% gain OR 15 days\n"
             f"  🛑 Stop: -30% loss"
@@ -478,15 +460,13 @@ def generate_alert_message(data):
             f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
             f"💡 **RECOMMENDATION**:\n"
             f"  ✅ Shares: Proven 89% annual return, low risk\n"
-            f"  ⚡ Options: Only if you expect 3-5 day explosive move\n"
-            f"  ⚠️ Options theta decay: -2% per day after 15 days"
+            f"  ⚡ Options: Only if you expect 3-5 day explosive move"
         )
     else:
         options_section = (
             f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
             f"⚠️ **OPTIONS PLAY**: Not Available\n"
-            f"  • No liquid options found\n"
-            f"  • Stick with shares"
+            f"  • No liquid options found"
         )
         recommendation = ""
     
@@ -501,6 +481,74 @@ def generate_alert_message(data):
         f"{options_section}\n"
         f"{recommendation}"
     )
+
+# ==========================================
+# NEW: EXIT ALERT FUNCTIONS
+# ==========================================
+def check_position_exits():
+    """Check if any positions hit stop/target"""
+    try:
+        open_positions = position_tracker.sheets.get_open_positions()
+        
+        if not open_positions:
+            return
+        
+        current_prices = {}
+        
+        for pos in open_positions:
+            ticker = pos['Ticker']
+            if ticker not in current_prices:
+                try:
+                    stock = yf.Ticker(ticker)
+                    hist = stock.history(period='1d')
+                    
+                    if not hist.empty:
+                        current_prices[ticker] = {
+                            'current': float(hist['Close'].iloc[-1]),
+                            'high': float(hist['High'].iloc[-1]),
+                            'low': float(hist['Low'].iloc[-1])
+                        }
+                except:
+                    continue
+        
+        exits = position_tracker.check_exits(current_prices)
+        
+        if exits:
+            exit_alerts = position_tracker.process_exits(exits)
+            
+            for alert in exit_alerts:
+                send_exit_alert(alert)
+    
+    except Exception as e:
+        print(f"❌ Error checking exits: {e}")
+
+def send_exit_alert(exit_data):
+    """Send Telegram alert for position exit"""
+    icon = "🎯" if exit_data['reason'] == 'TARGET' else "🛑"
+    status = "TARGET HIT!" if exit_data['reason'] == 'TARGET' else "STOP HIT"
+    color = "🟢" if exit_data['pnl']['dollar'] > 0 else "🔴"
+    
+    msg = f"""
+{icon} **{status}** {color}
+**{exit_data['ticker']}** {exit_data['direction']} {exit_data['type']}
+
+📊 Trade Summary:
+Entry: ${exit_data['entry']:.2f}
+Exit: ${exit_data['exit']:.2f}
+
+💰 P&L: ${exit_data['pnl']['dollar']:+,.2f} ({exit_data['pnl']['percent']:+.1f}%)
+
+Shares: {int(exit_data['quantity'])}
+Reason: {exit_data['reason']}
+
+✅ Check Google Sheet for full details!
+"""
+    
+    try:
+        bot.send_message(YOUR_CHAT_ID, msg, parse_mode="Markdown")
+        print(f"  📤 Exit alert sent: {exit_data['ticker']} {exit_data['pnl']['dollar']:+.2f}")
+    except Exception as e:
+        print(f"  ❌ Failed to send exit alert: {e}")
 
 # ==========================================
 # TELEGRAM COMMANDS
@@ -563,12 +611,324 @@ def show_stats(message):
     except Exception as e:
         bot.reply_to(message, f"Error: {e}")
 
+@bot.message_handler(commands=['positions'])
+def show_positions(message):
+    """NEW: Show all open positions"""
+    try:
+        open_positions = position_tracker.sheets.get_open_positions()
+        
+        if not open_positions:
+            bot.reply_to(message, "📊 No open positions")
+            return
+        
+        msg = f"📊 **OPEN POSITIONS ({len(open_positions)})**\n\n"
+        
+        for pos in open_positions:
+            msg += f"**{pos['Ticker']}** {pos['Direction']} {pos['Type']}\n"
+            msg += f"  Entry: ${pos['Entry_Price']}\n"
+            msg += f"  Stop: ${pos['Stop']} | Target: ${pos['Target']}\n"
+            msg += f"  Date: {pos['Entry_Date']}\n\n"
+        
+        bot.reply_to(message, msg, parse_mode="Markdown")
+    
+    except Exception as e:
+        bot.reply_to(message, f"Error: {e}")
+
+#==========================================
+#COMMANDS
 # ==========================================
+# ADD THESE COMMAND HANDLERS TO YOUR BOT
+
+# After the existing commands, add these:
+
+@bot.message_handler(commands=['entered'])
+def entered_from_alert(message):
+    """User entered a trade from bot alert"""
+    global last_activity_time
+    last_activity_time = datetime.now()
+    
+    try:
+        parts = message.text.split()
+        
+        # /entered ALERT_ID shares PRICE
+        # /entered ALERT_ID options CONTRACTS PREMIUM
+        
+        if len(parts) < 4:
+            bot.reply_to(message, 
+                "⚠️ **Usage:**\n\n"
+                "Shares: `/entered ALERT_ID shares PRICE`\n"
+                "Example: `/entered abc123 shares 915`\n\n"
+                "Options: `/entered ALERT_ID options CONTRACTS PREMIUM`\n"
+                "Example: `/entered abc123 options 2 36.50`",
+                parse_mode="Markdown")
+            return
+        
+        alert_id = parts[1]
+        trade_type_input = parts[2].upper()
+        
+        if trade_type_input == 'SHARES':
+            entry_price = float(parts[3])
+            quantity = position_tracker.alert_metadata.get(alert_id, {}).get('shares', 27)
+            
+            position_id, error = position_tracker.track_user_entry_from_alert(
+                alert_id, entry_price, quantity, 'SHARES'
+            )
+            
+            if error:
+                bot.reply_to(message, f"❌ {error}")
+                return
+            
+            metadata = position_tracker.alert_metadata[alert_id]
+            atr_estimate = abs(metadata['target'] - metadata['price']) / 3.5
+            
+            if metadata['direction'] == 'BULL':
+                stop = entry_price - (atr_estimate * 2.5)
+                target = entry_price + (atr_estimate * 3.5)
+            else:
+                stop = entry_price + (atr_estimate * 2.0)
+                target = entry_price - (atr_estimate * 4.0)
+            
+            msg = (
+                f"✅ **Position Tracked!**\n\n"
+                f"**{metadata['ticker']}** {metadata['direction']} SHARES\n"
+                f"Entry: ${entry_price:.2f}\n"
+                f"Shares: {quantity}\n"
+                f"Stop: ${stop:.2f}\n"
+                f"Target: ${target:.2f}\n\n"
+                f"📊 Tracked in:\n"
+                f"  ✅ Bot_Alerts (bot's price: ${metadata['price']:.2f})\n"
+                f"  ✅ My_Trades (your price: ${entry_price:.2f})\n\n"
+                f"🔔 I'll alert you when stop/target hit!"
+            )
+            
+            bot.reply_to(message, msg, parse_mode="Markdown")
+        
+        elif trade_type_input == 'OPTIONS':
+            contracts = int(parts[3])
+            premium = float(parts[4])
+            
+            position_id, error = position_tracker.track_user_entry_from_alert(
+                alert_id, premium, contracts, 'CALL', premium
+            )
+            
+            if error:
+                bot.reply_to(message, f"❌ {error}")
+                return
+            
+            metadata = position_tracker.alert_metadata[alert_id]
+            stop = premium * 0.7
+            target = premium * 1.5
+            
+            msg = (
+                f"✅ **Options Position Tracked!**\n\n"
+                f"**{metadata['ticker']}** {metadata['direction']} OPTIONS\n"
+                f"Contracts: {contracts}\n"
+                f"Premium: ${premium:.2f}\n"
+                f"Stop: ${stop:.2f} (-30%)\n"
+                f"Target: ${target:.2f} (+50%)\n\n"
+                f"📊 Tracked in My_Trades\n\n"
+                f"🔔 I'll alert you on exit!"
+            )
+            
+            bot.reply_to(message, msg, parse_mode="Markdown")
+    
+    except ValueError:
+        bot.reply_to(message, "❌ Invalid numbers. Check your command format.")
+    except Exception as e:
+        bot.reply_to(message, f"❌ Error: {e}")
+
+@bot.message_handler(commands=['buy'])
+def manual_buy(message):
+    """User found their own trade"""
+    global last_activity_time
+    last_activity_time = datetime.now()
+    
+    try:
+        parts = message.text.split()
+        
+        # /buy TICKER shares PRICE stop STOP target TARGET
+        # /buy TICKER call/put STRIKE EXPIRY CONTRACTS PREMIUM
+        
+        if len(parts) < 5:
+            bot.reply_to(message,
+                "⚠️ **Usage:**\n\n"
+                "Shares: `/buy TICKER shares PRICE stop STOP target TARGET`\n"
+                "Example: `/buy AAPL shares 185 stop 180 target 195`\n\n"
+                "Options: `/buy TICKER call/put STRIKE EXPIRY CONTRACTS PREMIUM`\n"
+                "Example: `/buy NVDA call 920 2026-03-21 2 36.50`",
+                parse_mode="Markdown")
+            return
+        
+        ticker = parts[1].upper()
+        trade_type_input = parts[2].lower()
+        
+        if trade_type_input == 'shares':
+            entry_price = float(parts[3])
+            
+            # Find stop and target
+            stop_idx = parts.index('stop') if 'stop' in parts else None
+            target_idx = parts.index('target') if 'target' in parts else None
+            
+            if not stop_idx or not target_idx:
+                bot.reply_to(message, "❌ Missing 'stop' or 'target' keyword")
+                return
+            
+            stop = float(parts[stop_idx + 1])
+            target = float(parts[target_idx + 1])
+            
+            # Determine direction
+            if target > entry_price:
+                direction = 'BULL'
+            else:
+                direction = 'BEAR'
+            
+            # Estimate quantity
+            quantity = int(2500 / entry_price)
+            
+            position_id = position_tracker.track_manual_trade(
+                ticker, direction, 'SHARES', entry_price, stop, target, quantity
+            )
+            
+            msg = (
+                f"✅ **Manual Trade Tracked!**\n\n"
+                f"**{ticker}** {direction} SHARES\n"
+                f"Entry: ${entry_price:.2f}\n"
+                f"Shares: {quantity}\n"
+                f"Stop: ${stop:.2f}\n"
+                f"Target: ${target:.2f}\n\n"
+                f"📊 Tracked in My_Trades ONLY\n"
+                f"(Not in Bot_Alerts - you found this!)\n\n"
+                f"🔔 I'll alert you on exit!"
+            )
+            
+            bot.reply_to(message, msg, parse_mode="Markdown")
+        
+        elif trade_type_input in ['call', 'put']:
+            strike = float(parts[3])
+            expiry = parts[4]
+            contracts = int(parts[5])
+            premium = float(parts[6])
+            
+            trade_type = 'CALL' if trade_type_input == 'call' else 'PUT'
+            direction = 'BULL' if trade_type == 'CALL' else 'BEAR'
+            
+            stop = premium * 0.7
+            target = premium * 1.5
+            
+            position_id = position_tracker.track_manual_trade(
+                ticker, direction, trade_type, premium, stop, target, contracts,
+                strike=strike, expiry=expiry, premium=premium
+            )
+            
+            msg = (
+                f"✅ **Manual Options Trade Tracked!**\n\n"
+                f"**{ticker}** {trade_type} ${strike} exp {expiry}\n"
+                f"Contracts: {contracts}\n"
+                f"Premium: ${premium:.2f}\n"
+                f"Stop: ${stop:.2f}\n"
+                f"Target: ${target:.2f}\n\n"
+                f"📊 Tracked in My_Trades ONLY\n\n"
+                f"🔔 I'll alert you on exit!"
+            )
+            
+            bot.reply_to(message, msg, parse_mode="Markdown")
+    
+    except ValueError:
+        bot.reply_to(message, "❌ Invalid numbers or format")
+    except Exception as e:
+        bot.reply_to(message, f"❌ Error: {e}")
+
+@bot.message_handler(commands=['close'])
+def manual_close(message):
+    """Manually close a position"""
+    global last_activity_time
+    last_activity_time = datetime.now()
+    
+    try:
+        parts = message.text.split()
+        
+        # /close TICKER PRICE
+        # /close ALERT_ID PRICE
+        
+        if len(parts) < 3:
+            bot.reply_to(message,
+                "⚠️ **Usage:**\n\n"
+                "`/close TICKER PRICE`\n"
+                "Example: `/close NVDA 982`\n\n"
+                "`/close ALERT_ID PRICE`\n"
+                "Example: `/close abc123 982`",
+                parse_mode="Markdown")
+            return
+        
+        identifier = parts[1].upper()
+        exit_price = float(parts[2])
+        
+        # Try to find in My_Trades first
+        pnl, error = position_tracker.close_position_manual(identifier, exit_price, sheet_type='my')
+        
+        if error:
+            # Try alert ID
+            bot.reply_to(message, f"❌ {error}")
+            return
+        
+        color = "🟢" if pnl['dollar'] > 0 else "🔴"
+        status = "PROFIT" if pnl['dollar'] > 0 else "LOSS"
+        
+        msg = (
+            f"✅ **Position Closed Manually** {color}\n\n"
+            f"**{identifier}**\n"
+            f"Exit: ${exit_price:.2f}\n\n"
+            f"💰 P&L: ${pnl['dollar']:+,.2f} ({pnl['percent']:+.1f}%)\n"
+            f"Status: {status}\n\n"
+            f"📊 Updated in My_Trades sheet"
+        )
+        
+        bot.reply_to(message, msg, parse_mode="Markdown")
+    
+    except ValueError:
+        bot.reply_to(message, "❌ Invalid price")
+    except Exception as e:
+        bot.reply_to(message, f"❌ Error: {e}")
+
+@bot.message_handler(commands=['performance'])
+def show_performance(message):
+    """Show detailed performance comparison"""
+    try:
+        bot_perf = position_tracker.sheets.bot_performance.get_all_records()
+        my_perf = position_tracker.sheets.my_performance.get_all_records()
+        
+        if not bot_perf and not my_perf:
+            bot.reply_to(message, "📊 No performance data yet")
+            return
+        
+        # Latest data
+        bot_latest = bot_perf[-1] if bot_perf else {}
+        my_latest = my_perf[-1] if my_perf else {}
+        
+        msg = (
+            f"📊 **PERFORMANCE COMPARISON**\n\n"
+            f"🤖 **Bot Performance (All Alerts):**\n"
+            f"  Win Rate: {bot_latest.get('Win_Rate%', 'N/A')}\n"
+            f"  Net P&L: {bot_latest.get('Net_PnL', 'N/A')}\n"
+            f"  Total Trades: {bot_latest.get('Total_Trades', 0)}\n\n"
+            f"👤 **Your Performance (Actual Trades):**\n"
+            f"  Win Rate: {my_latest.get('Win_Rate%', 'N/A')}\n"
+            f"  Net P&L: {my_latest.get('Net_PnL', 'N/A')}\n"
+            f"  Total Trades: {my_latest.get('Total_Trades', 0)}\n\n"
+            f"📈 Check Google Sheets for full details!"
+        )
+        
+        bot.reply_to(message, msg, parse_mode="Markdown")
+    
+    except Exception as e:
+        bot.reply_to(message, f"Error: {e}")
+
+#==========================================
 # AUTO SCANNER
 # ==========================================
 def scanner_loop():
     print("="*70)
-    print("🚀 ULTIMATE TRADING BOT v2.0 (Smart Alerts + Daily Reset)")
+    print("🚀 ULTIMATE TRADING BOT v2.0 (Smart Alerts + Daily Reset + Position Tracking)")
     print("="*70)
     print("📊 Execution: SHARES (proven 89% return)")
     print("⚡ Insights: OPTIONS (manual consideration)")
@@ -578,15 +938,14 @@ def scanner_loop():
     print("🔔 Smart Alerts: Only on direction changes or significant score moves")
     print("⏱️  Timing: 6-9 AM (60min) | 9 AM-4 PM (30min) | 4-5 PM (45min)")
     print("🌅 Daily Reset: Memory clears at midnight EST (fresh start)")
+    print("📝 Position Tracking: Google Sheets with stop/target alerts")
     print("="*70 + "\n")
     
     analysis_cache = {}
     cache_expiry = 900
     
-    # Track last alerts to prevent duplicates
-    last_alerts = {}  # {ticker: {'direction': 'BULL', 'score': 78, 'time': timestamp}}
+    last_alerts = {}
     
-    # Track current day for midnight reset
     tz = pytz.timezone('US/Eastern')
     current_day = datetime.now(tz).date()
     
@@ -599,9 +958,7 @@ def scanner_loop():
             now = datetime.now(tz)
             today = now.date()
             
-            # ==========================================
-            # MIDNIGHT RESET - Fresh start each day
-            # ==========================================
+            # MIDNIGHT RESET
             if today != current_day:
                 print("\n" + "="*70)
                 print(f"🌅 NEW TRADING DAY: {today.strftime('%Y-%m-%d')}")
@@ -610,21 +967,21 @@ def scanner_loop():
                 print(f"📊 Fresh analysis starts now")
                 print("="*70 + "\n")
                 
-                last_alerts = {}  # Clear all previous day's alerts
-                current_day = today  # Update day tracker
+                last_alerts = {}
+                current_day = today
             
-            # Determine scan interval based on time of day (PRO INVESTOR TIMING)
+            # Determine scan interval
             if 6 <= now.hour < 9:
-                scan_interval = 3600  # 60 minutes (pre-market, low volume)
+                scan_interval = 3600
                 interval_name = "60 min"
             elif 9 <= now.hour < 16:
-                scan_interval = 1800  # 30 minutes (market hours, high volume)
+                scan_interval = 1800
                 interval_name = "30 min"
             elif 16 <= now.hour < 17:
-                scan_interval = 2700  # 45 minutes (after-hours, medium volume)
+                scan_interval = 2700
                 interval_name = "45 min"
             else:
-                scan_interval = None  # Off hours
+                scan_interval = None
             
             # 6 AM - 5 PM EST
             if 6 <= now.hour < 17 and now.weekday() < 5:
@@ -638,9 +995,8 @@ def scanner_loop():
                 
                 for idx, ticker in enumerate(tickers, 1):
                     try:
-                        time.sleep(0.5)  # Rate limit
+                        time.sleep(0.5)
                         
-                        # Cache check
                         cache_key = f"{ticker}_{now.strftime('%Y%m%d%H%M')[:11]}"
                         if cache_key in analysis_cache:
                             cached_time, cached_data = analysis_cache[cache_key]
@@ -654,52 +1010,57 @@ def scanner_loop():
                             analysis_cache[cache_key] = (time.time(), data)
                         
                         if data:
-                            # ============================================
-                            # SMART DUPLICATE ALERT PREVENTION
-                            # ============================================
+                            # DUPLICATE ALERT PREVENTION
                             should_alert = False
                             alert_reason = ""
                             
                             if ticker not in last_alerts:
-                                # First time - always alert
                                 should_alert = True
                                 alert_reason = "NEW"
                             else:
                                 last = last_alerts[ticker]
                                 
-                                # RULE 1: Direction changed (CRITICAL!)
                                 if last['direction'] != data['direction']:
                                     should_alert = True
                                     alert_reason = f"🔄 {last['direction']}→{data['direction']}"
                                 
-                                # RULE 2: Score moved significantly (±10 points)
                                 elif abs(last['score'] - data['score']) >= 10:
                                     should_alert = True
                                     alert_reason = f"📊 Score {last['score']}→{data['score']}"
                                 
-                                # RULE 3: Alert is stale (>4 hours - market may have shifted)
                                 elif time.time() - last['time'] > 14400:
                                     should_alert = True
                                     alert_reason = "⏰ Stale (>4hrs)"
                                 
                                 else:
-                                    # Same direction, similar score, recent - SKIP
                                     should_alert = False
                                     duplicates_skipped += 1
                             
                             if should_alert:
                                 try:
-                                    # Send alert
                                     bot.send_message(YOUR_CHAT_ID, generate_alert_message(data), parse_mode="Markdown")
                                     
-                                    # Update tracker
+                                    # NEW: Track position in Google Sheets
+                                    position_id = position_tracker.track_entry({
+                                        'ticker': data['ticker'],
+                                        'direction': data['direction'],
+                                        'price': data['price'],
+                                        'stop': data['shares_trade']['stop'],
+                                        'target': data['shares_trade']['target'],
+                                        'shares': data['shares_trade']['shares'],
+                                        'score': data['score'],
+                                        'reasons': data['reasons']
+                                    }, trade_type='SHARES')
+                                    
+                                    if position_id:
+                                        print(f"  📝 Position tracked: {position_id}")
+                                    
                                     last_alerts[ticker] = {
                                         'direction': data['direction'],
                                         'score': data['score'],
                                         'time': time.time()
                                     }
                                     
-                                    # Log
                                     log_entry = {
                                         "Time": now.strftime("%Y-%m-%d %H:%M"),
                                         "Ticker": ticker,
@@ -730,12 +1091,13 @@ def scanner_loop():
                             time.sleep(60)
                         continue
                 
-                # Clean old cache entries (technical analysis cache)
+                # NEW: Check for position exits
+                check_position_exits()
+                
+                # Clean cache
                 current_time = time.time()
                 analysis_cache = {k: v for k, v in analysis_cache.items() 
                                 if current_time - v[0] < cache_expiry}
-                
-                # No need to clean last_alerts - midnight reset handles it
                 
                 print(f"\n💤 Scan complete at {now.strftime('%H:%M')}")
                 print(f"   ✅ New alerts sent: {alerts_sent}")
@@ -757,11 +1119,11 @@ def scanner_loop():
 # ==========================================
 @app.route('/')
 def index():
-    return "🤖 Ultimate Trading Bot Online (Shares + Options Insights)", 200
+    return "🤖 Ultimate Trading Bot v2.0 (Position Tracking Enabled)", 200
 
 @app.route('/health')
 def health():
-    return {"status": "healthy", "strategy": "shares_execution_options_insights"}
+    return {"status": "healthy", "version": "2.0", "features": ["signals", "position_tracking"]}
 
 def run_server():
     port = int(os.environ.get("PORT", 8080))
@@ -771,7 +1133,7 @@ def run_server():
 # MAIN
 # ==========================================
 if __name__ == "__main__":
-    print("\n🚀 Starting Ultimate Trading Bot...\n")
+    print("\n🚀 Starting Ultimate Trading Bot v2.0...\n")
     
     t_scan = threading.Thread(target=scanner_loop, daemon=True)
     t_scan.start()

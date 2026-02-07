@@ -1,7 +1,10 @@
-pyTelegramBotAPI
 yfinance
 pandas
 numpy
-Flask
-gunicorn
-pandas_ta
+python-telegram-bot
+flask
+pytz
+requests
+gspread
+google-auth
+python-dotenv
