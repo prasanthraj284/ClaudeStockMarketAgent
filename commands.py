@@ -178,19 +178,19 @@ Need help? Type /help anytime!
                     target = entry_price - (atr_estimate * 4.0)
                 
                 msg = (
-                    f"✅ **Position Tracked!**\n\n"
-                    f"**{metadata['ticker']}** {metadata['direction']} SHARES\n"
-                    f"Entry: ${entry_price:.2f}\n"
+                    f"✅ Position Tracked!\n\n"
+                    f"{metadata['ticker']} {metadata['direction']} SHARES\n"
+                    f"Entry: {entry_price:.2f}\n"
                     f"Shares: {quantity}\n"
-                    f"Stop: ${stop:.2f}\n"
-                    f"Target: ${target:.2f}\n\n"
+                    f"Stop: {stop:.2f}\n"
+                    f"Target: {target:.2f}\n\n"
                     f"📊 Tracked in:\n"
-                    f"  ✅ Bot_Alerts (bot price: ${metadata['price']:.2f})\n"
-                    f"  ✅ My_Trades (your price: ${entry_price:.2f})\n\n"
+                    f"  ✅ Bot_Alerts (bot price: {metadata['price']:.2f})\n"
+                    f"  ✅ My_Trades (your price: {entry_price:.2f})\n\n"
                     f"🔔 I'll alert you on exit!"
                 )
                 
-                bot.reply_to(message, msg, parse_mode="Markdown")
+                bot.reply_to(message, msg)
             
             elif trade_type_input == 'OPTIONS':
                 contracts = int(parts[3])
@@ -209,17 +209,17 @@ Need help? Type /help anytime!
                 target = premium * 1.5
                 
                 msg = (
-                    f"✅ **Options Position Tracked!**\n\n"
-                    f"**{metadata['ticker']}** OPTIONS\n"
+                    f"✅ Options Position Tracked!\n\n"
+                    f"{metadata['ticker']} OPTIONS\n"
                     f"Contracts: {contracts}\n"
-                    f"Premium: ${premium:.2f}\n"
-                    f"Stop: ${stop:.2f} (-30%)\n"
-                    f"Target: ${target:.2f} (+50%)\n\n"
+                    f"Premium: {premium:.2f}\n"
+                    f"Stop: {stop:.2f} (-30%)\n"
+                    f"Target: {target:.2f} (+50%)\n\n"
                     f"📊 Tracked in My_Trades\n\n"
                     f"🔔 I'll alert you on exit!"
                 )
                 
-                bot.reply_to(message, msg, parse_mode="Markdown")
+                bot.reply_to(message, msg)
         
         except ValueError:
             bot.reply_to(message, "❌ Invalid numbers. Check your format.")
@@ -272,18 +272,18 @@ Need help? Type /help anytime!
                 )
                 
                 msg = (
-                    f"✅ **Manual Trade Tracked!**\n\n"
-                    f"**{ticker}** {direction} SHARES\n"
-                    f"Entry: ${entry_price:.2f}\n"
+                    f"✅ Manual Trade Tracked!\n\n"
+                    f"{ticker} {direction} SHARES\n"
+                    f"Entry: {entry_price:.2f}\n"
                     f"Shares: {quantity}\n"
-                    f"Stop: ${stop:.2f}\n"
-                    f"Target: ${target:.2f}\n\n"
+                    f"Stop: {stop:.2f}\n"
+                    f"Target: {target:.2f}\n\n"
                     f"📊 Tracked in My_Trades ONLY\n"
                     f"(You found this, not bot!)\n\n"
                     f"🔔 I'll alert you on exit!"
                 )
                 
-                bot.reply_to(message, msg, parse_mode="Markdown")
+                bot.reply_to(message, msg)
             
             elif trade_type_input in ['call', 'put']:
                 # OPTIONS TRADE
@@ -313,19 +313,19 @@ Need help? Type /help anytime!
                 )
                 
                 msg = (
-                    f"✅ **Manual Options Trade Tracked!**\n\n"
-                    f"**{ticker}** {trade_type} ${strike} exp {expiry}\n"
+                    f"✅ Manual Options Trade Tracked!\n\n"
+                    f"{ticker} {trade_type} Strike: {strike} exp {expiry}\n"
                     f"Direction: {direction}\n"
                     f"Contracts: {contracts}\n"
-                    f"Premium: ${premium:.2f}\n"
-                    f"Stop: ${stop:.2f} (-30%)\n"
-                    f"Target: ${target:.2f} (+50%)\n\n"
+                    f"Premium: {premium:.2f}\n"
+                    f"Stop: {stop:.2f} (-30%)\n"
+                    f"Target: {target:.2f} (+50%)\n\n"
                     f"📊 Tracked in My_Trades ONLY\n"
                     f"(You found this, not bot!)\n\n"
                     f"🔔 I'll alert you on exit!"
                 )
                 
-                bot.reply_to(message, msg, parse_mode="Markdown")
+                bot.reply_to(message, msg)  # No parse_mode
             
             else:
                 bot.reply_to(message, 
@@ -367,15 +367,15 @@ Need help? Type /help anytime!
             status = "PROFIT" if pnl['dollar'] > 0 else "LOSS"
             
             msg = (
-                f"✅ **Position Closed** {color}\n\n"
-                f"**{ticker}**\n"
-                f"Exit: ${exit_price:.2f}\n\n"
-                f"💰 P&L: ${pnl['dollar']:+,.2f} ({pnl['percent']:+.1f}%)\n"
+                f"✅ Position Closed {color}\n\n"
+                f"{ticker}\n"
+                f"Exit: {exit_price:.2f}\n\n"
+                f"💰 P&L: {pnl['dollar']:+,.2f} ({pnl['percent']:+.1f}%)\n"
                 f"Status: {status}\n\n"
                 f"📊 Updated in My_Trades"
             )
             
-            bot.reply_to(message, msg, parse_mode="Markdown")
+            bot.reply_to(message, msg)
         
         except ValueError:
             bot.reply_to(message, "❌ Invalid price")
