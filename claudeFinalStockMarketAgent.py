@@ -14,6 +14,7 @@ import pytz
 # NEW: Position tracking imports
 from position_tracker import PositionTracker
 from config import get_telegram_token, get_telegram_chat_id
+from commands import register_commands
 
 # ==========================================
 # 🔐 SECURE CONFIGURATION (from environment variables)
@@ -29,6 +30,7 @@ app = Flask(__name__)
 
 # NEW: Initialize position tracker
 position_tracker = PositionTracker()
+update_activity = register_commands(bot, position_tracker, YOUR_CHAT_ID)  # ← ADD THIS
 
 # ==========================================
 # ULTIMATE HYBRID: SHARES EXECUTION + OPTIONS INSIGHTS + POSITION TRACKING
