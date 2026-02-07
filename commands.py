@@ -15,17 +15,23 @@ def register_commands(bot, position_tracker, YOUR_CHAT_ID):
         YOUR_CHAT_ID: Your Telegram chat ID
     """
     
-    # Track activity for health checks
-    last_activity_time = datetime.now()
+    print("🔧 Registering command handlers...")
     
-    def update_activity():
-        nonlocal last_activity_time
-        last_activity_time = datetime.now()
-        return last_activity_time
+    # Simple activity tracker (not using nonlocal)
+    class ActivityTracker:
+        def __init__(self):
+            self.last_activity = datetime.now()
+        
+        def update(self):
+            self.last_activity = datetime.now()
+            return self.last_activity
+    
+    activity = ActivityTracker()
     
     @bot.message_handler(commands=['help'])
     def show_help(message):
         """Complete help guide"""
+        print("📖 /help command triggered!")  # Debug
         help_text = """
 🤖 **TRADING BOT COMMANDS**
 
@@ -126,7 +132,7 @@ Need help? Type /help anytime!
     @bot.message_handler(commands=['entered'])
     def entered_from_alert(message):
         """User entered a trade from bot alert"""
-        update_activity()
+        activity.update()
         
         try:
             parts = message.text.split()
@@ -223,7 +229,7 @@ Need help? Type /help anytime!
     @bot.message_handler(commands=['buy'])
     def manual_buy(message):
         """User found their own trade"""
-        update_activity()
+        activity.update()
         
         try:
             parts = message.text.split()
@@ -285,7 +291,7 @@ Need help? Type /help anytime!
     @bot.message_handler(commands=['close'])
     def manual_close(message):
         """Manually close a position"""
-        update_activity()
+        activity.update()
         
         try:
             parts = message.text.split()
@@ -358,5 +364,13 @@ Need help? Type /help anytime!
         except Exception as e:
             bot.reply_to(message, f"Error: {e}")
     
-    # Return the update_activity function so main bot can use it
-    return update_activity
+    print("✅ Command handlers registered successfully!")
+    print("   - /help")
+    print("   - /commands")
+    print("   - /entered")
+    print("   - /buy")
+    print("   - /close")
+    print("   - /performance")
+    
+    # Return the activity tracker update function
+    return activity.update
