@@ -238,7 +238,9 @@ Need help? Type /help anytime!
                 bot.reply_to(message,
                     "⚠️ **Usage:**\n\n"
                     "Shares: `/buy TICKER shares PRICE stop STOP target TARGET`\n"
-                    "Example: `/buy AAPL shares 185 stop 180 target 195`",
+                    "Example: `/buy AAPL shares 185 stop 180 target 195`\n\n"
+                    "Options: `/buy TICKER call/put STRIKE EXPIRY CONTRACTS PREMIUM`\n"
+                    "Example: `/buy AMZN put 190 2026-03-20 1 3.25`",
                     parse_mode="Markdown")
                 return
             
@@ -282,9 +284,57 @@ Need help? Type /help anytime!
                 )
                 
                 bot.reply_to(message, msg, parse_mode="Markdown")
+            
+            elif trade_type_input in ['call', 'put']:
+                # OPTIONS TRADE
+                if len(parts) < 7:
+                    bot.reply_to(message, 
+                        "❌ Missing parameters for options!\n\n"
+                        "Format: `/buy TICKER call/put STRIKE EXPIRY CONTRACTS PREMIUM`\n"
+                        "Example: `/buy AMZN put 190 2026-03-20 1 3.25`",
+                        parse_mode="Markdown")
+                    return
+                
+                strike = float(parts[3])
+                expiry = parts[4]
+                contracts = int(parts[5])
+                premium = float(parts[6])
+                
+                trade_type = 'CALL' if trade_type_input == 'call' else 'PUT'
+                direction = 'BULL' if trade_type == 'CALL' else 'BEAR'
+                
+                # Auto-calculate stop/target for options (simple percentages)
+                stop = premium * 0.7  # -30% stop
+                target = premium * 1.5  # +50% target
+                
+                position_id = position_tracker.track_manual_trade(
+                    ticker, direction, trade_type, premium, stop, target, contracts,
+                    strike=strike, expiry=expiry, premium=premium
+                )
+                
+                msg = (
+                    f"✅ **Manual Options Trade Tracked!**\n\n"
+                    f"**{ticker}** {trade_type} ${strike} exp {expiry}\n"
+                    f"Direction: {direction}\n"
+                    f"Contracts: {contracts}\n"
+                    f"Premium: ${premium:.2f}\n"
+                    f"Stop: ${stop:.2f} (-30%)\n"
+                    f"Target: ${target:.2f} (+50%)\n\n"
+                    f"📊 Tracked in My_Trades ONLY\n"
+                    f"(You found this, not bot!)\n\n"
+                    f"🔔 I'll alert you on exit!"
+                )
+                
+                bot.reply_to(message, msg, parse_mode="Markdown")
+            
+            else:
+                bot.reply_to(message, 
+                    f"❌ Unknown trade type: '{trade_type_input}'\n\n"
+                    "Use: `shares`, `call`, or `put`",
+                    parse_mode="Markdown")
         
-        except ValueError:
-            bot.reply_to(message, "❌ Invalid numbers")
+        except ValueError as e:
+            bot.reply_to(message, f"❌ Invalid numbers: {e}")
         except Exception as e:
             bot.reply_to(message, f"❌ Error: {e}")
     
