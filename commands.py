@@ -286,12 +286,13 @@ Need help? Type /help anytime!
                 bot.reply_to(message, msg)
             
             elif trade_type_input in ['call', 'put']:
-                # OPTIONS TRADE
+                # OPTIONS TRADE - Auto-calculate stock price stop/target (±5%)
                 if len(parts) < 7:
                     bot.reply_to(message, 
                         "❌ Missing parameters for options!\n\n"
                         "Format: `/buy TICKER call/put STRIKE EXPIRY CONTRACTS PREMIUM`\n"
-                        "Example: `/buy AMZN put 190 2026-03-20 1 3.25`",
+                        "Example: `/buy AMZN put 190 2026-03-20 1 3.25`\n\n"
+                        "Bot will auto-set stop/target based on ±5% stock movement",
                         parse_mode="Markdown")
                     return
                 
@@ -303,29 +304,51 @@ Need help? Type /help anytime!
                 trade_type = 'CALL' if trade_type_input == 'call' else 'PUT'
                 direction = 'BULL' if trade_type == 'CALL' else 'BEAR'
                 
-                # Auto-calculate stop/target for options (simple percentages)
-                stop = premium * 0.7  # -30% stop
-                target = premium * 1.5  # +50% target
-                
-                position_id = position_tracker.track_manual_trade(
-                    ticker, direction, trade_type, premium, stop, target, contracts,
-                    strike=strike, expiry=expiry, premium=premium
-                )
-                
-                msg = (
-                    f"✅ Manual Options Trade Tracked!\n\n"
-                    f"{ticker} {trade_type} Strike: {strike} exp {expiry}\n"
-                    f"Direction: {direction}\n"
-                    f"Contracts: {contracts}\n"
-                    f"Premium: {premium:.2f}\n"
-                    f"Stop: {stop:.2f} (-30%)\n"
-                    f"Target: {target:.2f} (+50%)\n\n"
-                    f"📊 Tracked in My_Trades ONLY\n"
-                    f"(You found this, not bot!)\n\n"
-                    f"🔔 I'll alert you on exit!"
-                )
-                
-                bot.reply_to(message, msg)  # No parse_mode
+                # Get current stock price
+                try:
+                    import yfinance as yf
+                    stock = yf.Ticker(ticker)
+                    hist = stock.history(period='1d')
+                    current_stock_price = float(hist['Close'].iloc[-1])
+                    
+                    # Auto-calculate stop/target based on ±5% STOCK PRICE movement
+                    if trade_type == 'PUT':
+                        # PUT: Profit when stock goes DOWN, loss when goes UP
+                        stock_stop = current_stock_price * 1.05  # +5% = bad for put
+                        stock_target = current_stock_price * 0.95  # -5% = good for put
+                    else:  # CALL
+                        # CALL: Profit when stock goes UP, loss when goes DOWN  
+                        stock_stop = current_stock_price * 0.95  # -5% = bad for call
+                        stock_target = current_stock_price * 1.05  # +5% = good for call
+                    
+                    # Track the position (entry_price = current stock price for tracking)
+                    position_id = position_tracker.track_manual_trade(
+                        ticker, direction, trade_type, current_stock_price, 
+                        stock_stop, stock_target, contracts,
+                        strike=strike, expiry=expiry, premium=premium
+                    )
+                    
+                    msg = (
+                        f"✅ Manual Options Trade Tracked!\n\n"
+                        f"{ticker} {trade_type} Strike: {strike} exp {expiry}\n"
+                        f"Direction: {direction}\n"
+                        f"Contracts: {contracts}\n"
+                        f"Premium paid: {premium:.2f}\n\n"
+                        f"📊 Stock-based tracking:\n"
+                        f"Current stock: {current_stock_price:.2f}\n"
+                        f"Stop (stock): {stock_stop:.2f} ({'+5%' if trade_type == 'PUT' else '-5%'})\n"
+                        f"Target (stock): {stock_target:.2f} ({'-5%' if trade_type == 'PUT' else '+5%'})\n\n"
+                        f"Exit when:\n"
+                        f"  • Stock hits stop/target\n"
+                        f"  • OR expiry date: {expiry}\n\n"
+                        f"📊 Tracked in My_Trades ONLY\n"
+                        f"🔔 I'll alert you on exit!"
+                    )
+                    
+                    bot.reply_to(message, msg)
+                    
+                except Exception as e:
+                    bot.reply_to(message, f"❌ Error getting stock price: {e}")
             
             else:
                 bot.reply_to(message, 
