@@ -34,9 +34,10 @@ position_tracker = PositionTracker()
 # Register all commands
 update_activity = register_commands(bot, position_tracker, YOUR_CHAT_ID)
 
-# Track last activity time for health checks
-last_activity_time = datetime.now()
-last_health_check = datetime.now()
+# Track last activity time for health checks (timezone-aware)
+tz = pytz.timezone('US/Eastern')
+last_activity_time = datetime.now(tz)
+last_health_check = datetime.now(tz)
 
 # ==========================================
 # ULTIMATE TRADING BOT v3.0 - ALL BUGS FIXED
@@ -524,7 +525,8 @@ def check_position_exits():
 def send_exit_alert(exit_data):
     """Send Telegram alert for position exit"""
     global last_activity_time
-    last_activity_time = datetime.now()
+    tz = pytz.timezone('US/Eastern')
+    last_activity_time = datetime.now(tz)
     
     icon = "🎯" if exit_data['reason'] == 'TARGET' else "🛑" if exit_data['reason'] == 'STOP' else "⏰"
     
@@ -641,7 +643,8 @@ def send_health_check():
 def manual_check(message):
     """Manual check - does NOT track"""
     global last_activity_time
-    last_activity_time = datetime.now()
+    tz = pytz.timezone('US/Eastern')
+    last_activity_time = datetime.now(tz)
     
     try:
         parts = message.text.split()
@@ -665,7 +668,8 @@ def manual_check(message):
 def manual_scan(message):
     """Force scan top movers"""
     global last_activity_time
-    last_activity_time = datetime.now()
+    tz = pytz.timezone('US/Eastern')
+    last_activity_time = datetime.now(tz)
     
     bot.reply_to(message, "🦅 Force-scanning top movers...")
     movers = get_yahoo_top_movers()[:20]
@@ -845,8 +849,11 @@ def scanner_loop():
                                 try:
                                     alert_id = str(uuid.uuid4())[:8]
                                     
-                                    # Send Telegram alert
-                                    bot.send_message(YOUR_CHAT_ID, generate_alert_message(data, alert_id), parse_mode="Markdown")
+                                    # Send Telegram alert WITHOUT Markdown to avoid parsing errors
+                                    alert_msg = generate_alert_message(data, alert_id)
+                                    # Remove ** and ` characters that cause parsing issues
+                                    alert_msg_safe = alert_msg.replace('**', '').replace('`', '')
+                                    bot.send_message(YOUR_CHAT_ID, alert_msg_safe)
                                     
                                     # CRITICAL: Track in Bot_Alerts sheet
                                     position_tracker.track_bot_alert({
@@ -878,7 +885,7 @@ def scanner_loop():
                                     })
                                     
                                     alerts_sent += 1
-                                    last_activity_time = now
+                                    last_activity_time = now  # Already timezone-aware from above
                                     print(f"  [{idx}/{len(tickers)}] ✅ {ticker} {data['direction']} ({data['score']}) ID:{alert_id}")
                                     time.sleep(2)
                                 
