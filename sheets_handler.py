@@ -183,21 +183,17 @@ class PositionSheet:
             except:
                 days = 0
             
-            # CRITICAL: Update ALL exit columns in ONE batch to avoid race conditions
+            # CRITICAL: Update ALL exit columns individually to avoid batch errors
             # Columns: N=Status, O=Exit_Price, P=Exit_Date, Q=Exit_Reason, R=PnL_Dollar, S=PnL_Percent, T=Days_Held
             
-            updates = [
-                exit_data['status'],           # N - Status (CLOSED_PROFIT or CLOSED_LOSS)
-                exit_data['exit_price'],       # O - Exit_Price
-                exit_data['exit_date'],        # P - Exit_Date
-                exit_data['exit_reason'],      # Q - Exit_Reason
-                exit_data['pnl_dollar'],       # R - PnL_Dollar
-                exit_data['pnl_percent'],      # S - PnL_Percent
-                days                            # T - Days_Held
-            ]
-            
-            # Update in batch (more reliable than individual updates)
-            worksheet.update(f'N{row_num}:T{row_num}', [updates])
+            # Update each column individually (more reliable with gspread)
+            worksheet.update_acell(f'N{row_num}', str(exit_data['status']))           # Status
+            worksheet.update_acell(f'O{row_num}', float(exit_data['exit_price']))     # Exit_Price
+            worksheet.update_acell(f'P{row_num}', str(exit_data['exit_date']))        # Exit_Date
+            worksheet.update_acell(f'Q{row_num}', str(exit_data['exit_reason']))      # Exit_Reason
+            worksheet.update_acell(f'R{row_num}', float(exit_data['pnl_dollar']))     # PnL_Dollar
+            worksheet.update_acell(f'S{row_num}', float(exit_data['pnl_percent']))    # PnL_Percent
+            worksheet.update_acell(f'T{row_num}', int(days))                          # Days_Held
             
             # Color code the row
             if exit_data['pnl_dollar'] > 0:
