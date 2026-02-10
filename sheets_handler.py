@@ -243,37 +243,86 @@ class PositionSheet:
             
             all_records = worksheet.get_all_records()
             
+            # Filter for today's closed positions
             today_closed = [r for r in all_records 
                            if r.get('Exit_Date', '').startswith(today) and r.get('Status') != 'OPEN']
             
             if not today_closed:
+                print(f"  ⚠️ No closed positions today for {sheet_type} sheet")
                 return
             
-            wins = [r for r in today_closed if r.get('PnL_Dollar', 0) > 0]
-            losses = [r for r in today_closed if r.get('PnL_Dollar', 0) <= 0]
+            print(f"  📊 Calculating performance for {len(today_closed)} closed positions...")
             
-            gross_profit = sum(r.get('PnL_Dollar', 0) for r in wins)
-            gross_loss = sum(r.get('PnL_Dollar', 0) for r in losses)
+            # Calculate wins and losses (handle string/numeric conversion)
+            wins = []
+            losses = []
+            
+            for r in today_closed:
+                try:
+                    pnl = r.get('PnL_Dollar', 0)
+                    # Convert to float if it's a string
+                    if isinstance(pnl, str):
+                        pnl = float(pnl) if pnl else 0
+                    
+                    if pnl > 0:
+                        wins.append(r)
+                    else:
+                        losses.append(r)
+                except:
+                    # If conversion fails, treat as 0
+                    losses.append(r)
+            
+            # Calculate totals
+            gross_profit = 0
+            for r in wins:
+                try:
+                    pnl = r.get('PnL_Dollar', 0)
+                    if isinstance(pnl, str):
+                        pnl = float(pnl) if pnl else 0
+                    gross_profit += pnl
+                except:
+                    pass
+            
+            gross_loss = 0
+            for r in losses:
+                try:
+                    pnl = r.get('PnL_Dollar', 0)
+                    if isinstance(pnl, str):
+                        pnl = float(pnl) if pnl else 0
+                    gross_loss += pnl
+                except:
+                    pass
+            
+            # Calculate win rate
+            win_rate = f"{len(wins)/len(today_closed)*100:.1f}%" if today_closed else "0%"
             
             row = [
                 today, 
                 len(today_closed), 
                 len(wins), 
                 len(losses),
-                f"{len(wins)/len(today_closed)*100:.1f}%" if today_closed else "0%",
-                f"${gross_profit:.2f}", 
-                f"${gross_loss:.2f}",
-                f"${gross_profit + gross_loss:.2f}"
+                win_rate,
+                gross_profit,  # Don't format as string with $
+                gross_loss,    # Don't format as string with $
+                gross_profit + gross_loss  # Don't format as string with $
             ]
             
+            print(f"  📈 Performance stats: {len(wins)}W / {len(losses)}L, Win Rate: {win_rate}, Net: ${gross_profit + gross_loss:.2f}")
+            
+            # Update or append
             dates = perf_sheet.col_values(1)
             if today in dates:
                 row_num = dates.index(today) + 1
+                print(f"  🔄 Updating existing row {row_num} for {today}")
                 perf_sheet.update(f'A{row_num}:H{row_num}', [row])
             else:
+                print(f"  ➕ Adding new row for {today}")
                 perf_sheet.append_row(row)
             
             time.sleep(1)  # Rate limit protection
+            print(f"  ✅ Performance updated for {sheet_type}")
             
         except Exception as e:
             print(f"  ❌ Error updating performance: {e}")
+            import traceback
+            traceback.print_exc()
