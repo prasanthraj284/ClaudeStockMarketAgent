@@ -652,12 +652,15 @@ def manual_check(message):
             return bot.reply_to(message, "⚠️ Use: /check TICKER\nExample: /check NVDA")
         
         ticker = parts[1].upper()
-        bot.reply_to(message, f"🔍 Analyzing {ticker}...\n\n⚠️ This is a manual check - NOT tracked automatically.\nUse `/entered {ticker} shares PRICE` if you enter.")
+        bot.reply_to(message, f"🔍 Analyzing {ticker}...\n\n⚠️ This is a manual check - NOT tracked automatically.\nUse /entered {ticker} shares PRICE if you enter.")
         
         data = analyze_stock(ticker, strict=False)
         
         if data:
-            bot.send_message(message.chat.id, generate_alert_message(data), parse_mode="Markdown")
+            # Remove Markdown to avoid parsing errors
+            alert_msg = generate_alert_message(data)
+            alert_msg_safe = alert_msg.replace('**', '').replace('`', '')
+            bot.send_message(message.chat.id, alert_msg_safe)
         else:
             bot.reply_to(message, "❌ Error analyzing ticker.")
     
@@ -679,7 +682,9 @@ def manual_scan(message):
         data = analyze_stock(ticker, strict=True)
         if data:
             alert_id = str(uuid.uuid4())[:8]
-            bot.send_message(message.chat.id, generate_alert_message(data, alert_id), parse_mode="Markdown")
+            alert_msg = generate_alert_message(data, alert_id)
+            alert_msg_safe = alert_msg.replace('**', '').replace('`', '')
+            bot.send_message(message.chat.id, alert_msg_safe)
             found += 1
             time.sleep(1)
     
